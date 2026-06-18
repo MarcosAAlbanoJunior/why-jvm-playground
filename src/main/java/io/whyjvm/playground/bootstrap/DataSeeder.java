@@ -4,6 +4,7 @@ import io.whyjvm.playground.catalog.Author;
 import io.whyjvm.playground.catalog.AuthorRepository;
 import io.whyjvm.playground.catalog.Book;
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.core.annotation.Order;
@@ -11,9 +12,14 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Carga inicial do catalogo. Cria autores e um bom volume de livros para que o
- * cenario de N+1 tenha massa de dados suficiente — uma pagina grande de livros
- * gera dezenas de queries por causa do autor lazy.
+ * Carga inicial do catalogo. Cada livro tem o <b>seu proprio autor</b> (1:1), de
+ * proposito: assim o N+1 escala com o tamanho da pagina. Percorrer uma pagina de
+ * {@code limit} livros e tocar no autor lazy de cada um dispara <b>uma query por
+ * livro</b> — {@code limit=300} faz ~300 queries e a rota fica nitidamente lenta.
+ *
+ * <p>Se os autores fossem reusados (poucos autores, muitos livros), o persistence
+ * context cacheria cada autor apos a 1a query e o N+1 saturaria em "numero de
+ * autores distintos" — invisivel no tempo total. Por isso 1 autor por livro.
  *
  * <p>E idempotente: so popula quando o banco esta vazio, entao reiniciar a
  * aplicacao (ou o container) nao duplica os dados.
@@ -25,7 +31,14 @@ import org.springframework.transaction.annotation.Transactional;
 @Order(0)
 public class DataSeeder implements CommandLineRunner {
 
-    private static final int BOOKS_PER_AUTHOR = 35;
+    /** Tamanho do catalogo. >= MAX_LIMIT do controller, para o N+1 escalar ate o teto. */
+    private static final int CATALOG_SIZE = 500;
+
+    /** Nomes-base reaproveitados (com sufixo numerico) so para variar a massa. */
+    private static final List<String> BASE_NAMES = List.of(
+            "Machado de Assis", "Clarice Lispector", "Jorge Amado", "Graciliano Ramos",
+            "Guimaraes Rosa", "Cecilia Meireles", "Carlos Drummond", "Mario de Andrade",
+            "Lima Barreto", "Rachel de Queiroz", "Erico Verissimo", "Monteiro Lobato");
 
     private final AuthorRepository authors;
 
@@ -39,31 +52,18 @@ public class DataSeeder implements CommandLineRunner {
         if (authors.count() > 0) {
             return;
         }
-        seedAuthors().forEach(this::fillCatalog);
-    }
-
-    private List<Author> seedAuthors() {
-        return List.of(
-                new Author("Machado de Assis", "Brasil"),
-                new Author("Clarice Lispector", "Brasil"),
-                new Author("Jorge Amado", "Brasil"),
-                new Author("Graciliano Ramos", "Brasil"),
-                new Author("Guimaraes Rosa", "Brasil"),
-                new Author("Cecilia Meireles", "Brasil"),
-                new Author("Carlos Drummond", "Brasil"),
-                new Author("Mario de Andrade", "Brasil"),
-                new Author("Lima Barreto", "Brasil"),
-                new Author("Rachel de Queiroz", "Brasil"),
-                new Author("Erico Verissimo", "Brasil"),
-                new Author("Monteiro Lobato", "Brasil"));
-    }
-
-    /** Gera {@value #BOOKS_PER_AUTHOR} livros para o autor e persiste em cascata. */
-    private void fillCatalog(Author author) {
-        for (int volume = 1; volume <= BOOKS_PER_AUTHOR; volume++) {
-            BigDecimal price = BigDecimal.valueOf(2900L + (volume * 137L % 7000L), 2);
-            author.addBook(new Book("%s - Volume %02d".formatted(author.getName(), volume), price));
+        List<Author> catalog = new ArrayList<>(CATALOG_SIZE);
+        for (int i = 1; i <= CATALOG_SIZE; i++) {
+            Author author = new Author(authorName(i), "Brasil");
+            BigDecimal price = BigDecimal.valueOf(2900L + (i * 137L % 7000L), 2);
+            author.addBook(new Book("Volume %04d".formatted(i), price));
+            catalog.add(author);
         }
-        authors.save(author);
+        authors.saveAll(catalog);
+    }
+
+    /** Um nome distinto por autor: nome-base ciclico + indice, garantindo unicidade. */
+    private String authorName(int i) {
+        return "%s %03d".formatted(BASE_NAMES.get(i % BASE_NAMES.size()), i);
     }
 }

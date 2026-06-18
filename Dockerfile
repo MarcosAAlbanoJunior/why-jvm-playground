@@ -30,7 +30,7 @@ ENTRYPOINT ["java", "-jar", "/app/app.jar"]
 # Build deste estagio: docker compose -f docker-compose.yml -f docker-compose.whyjvm.yml up --build
 FROM runtime AS runtime-whyjvm
 ARG OTEL_AGENT_VERSION=2.28.1
-ARG WHYJVM_RELEASE=v0.1.0-rc4
+ARG WHYJVM_RELEASE=v0.1.0-rc6
 ADD https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v${OTEL_AGENT_VERSION}/opentelemetry-javaagent.jar /agent/opentelemetry-javaagent.jar
 ADD https://github.com/MarcosAAlbanoJunior/why-jvm/releases/download/${WHYJVM_RELEASE}/why-jvm-otel-extension-all.jar /agent/why-jvm-extension.jar
 # Fontes da app na imagem: habilitam o code-aware. O resolver busca pela
