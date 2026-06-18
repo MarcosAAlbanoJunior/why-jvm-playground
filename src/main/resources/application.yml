@@ -1,0 +1,50 @@
+spring:
+  application:
+    name: whyjvm-playground
+
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/whyjvm}
+    username: ${SPRING_DATASOURCE_USERNAME:whyjvm}
+    password: ${SPRING_DATASOURCE_PASSWORD:whyjvm}
+    hikari:
+      pool-name: whyjvm-pool
+      # Pool propositalmente pequeno: deixa o cenario de exaustao de conexao
+      # (POST /api/database/saturate-pool) facil de provocar com poucas chamadas.
+      maximum-pool-size: ${DB_POOL_SIZE:5}
+      # Espera curta por uma conexao livre: as chamadas excedentes estouram rapido.
+      connection-timeout: 2000
+
+  jpa:
+    # Desligado de proposito (boa pratica): o carregamento lazy so acontece
+    # dentro de um metodo @Transactional, nunca "por acidente" na camada web.
+    open-in-view: false
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        format_sql: true
+
+server:
+  port: 8080
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info
+
+# Aquecimento do baseline de latencia do why-jvm. Na subida, a aplicacao faz
+# chamadas HTTP nela mesma nos endpoints "rapidos" para o agente formar um p99
+# baixo por rota — sem isso, um endpoint lento nao teria contra o que se destacar.
+playground:
+  warmup:
+    enabled: ${PLAYGROUND_WARMUP_ENABLED:true}
+    iterations: ${PLAYGROUND_WARMUP_ITERATIONS:120}

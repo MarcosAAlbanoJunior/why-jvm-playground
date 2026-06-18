@@ -1,0 +1,59 @@
+# Sobe Postgres + a aplicacao COM o agente why-jvm anexado (modo split): o agente
+# captura o incidente e ENCAMINHA para o analysis-service em Go (http://analysis-service:9090),
+# que roda o LLM e despacha o laudo.
+#
+# Os jars do agente vem de releases publicadas no GitHub (ver Dockerfile, estagio
+# runtime-whyjvm), entao EXIGE a release do why-jvm-mcp publicada (WHYJVM_RELEASE).
+#
+# Pre-requisitos:
+#   1) docker network create whyjvm-net          # rede compartilhada (uma vez so)
+#   2) suba o analysis-service: no repo why-jvm-mcp -> docker compose up --build
+#
+# Uso:
+#   docker compose up --build
+# Depois abra http://localhost:8080, dispare um cenario (ex.: GET /api/faults/checkout)
+# e veja o laudo no log do analysis-service (no repo why-jvm-mcp: docker compose logs -f).
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: whyjvm
+      POSTGRES_USER: whyjvm
+      POSTGRES_PASSWORD: whyjvm
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U whyjvm -d whyjvm"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      target: runtime-whyjvm
+      args:
+        OTEL_AGENT_VERSION: "2.28.1"
+        WHYJVM_RELEASE: "v0.1.0-rc4"
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/whyjvm
+      SPRING_DATASOURCE_USERNAME: whyjvm
+      SPRING_DATASOURCE_PASSWORD: whyjvm
+      # Pool pequeno de proposito: o cenario de exaustao precisa de poucas chamadas.
+      DB_POOL_SIZE: "5"
+    # `default` mantem o acesso ao Postgres (servico db); `whyjvm-net` da o acesso
+    # ao analysis-service por DNS. Sem listar as duas, o app sairia da rede default
+    # e perderia o banco.
+    networks:
+      - default
+      - whyjvm-net
+
+# Mesma rede externa declarada no compose do why-jvm-mcp.
+networks:
+  whyjvm-net:
+    external: true

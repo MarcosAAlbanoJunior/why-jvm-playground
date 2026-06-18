@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>why-jvm playground</title>
+  <style>
+    :root {
+      --bg: #0f1115; --panel: #171a21; --border: #262b36; --text: #e6e9ef;
+      --muted: #8b93a7; --accent: #5b8cff; --ok: #3fb950; --warn: #d29922; --err: #f85149;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: "Segoe UI", system-ui, sans-serif; background: var(--bg);
+      color: var(--text); line-height: 1.5;
+    }
+    header { padding: 28px 32px 12px; border-bottom: 1px solid var(--border); }
+    header h1 { margin: 0; font-size: 22px; }
+    header p { margin: 6px 0 0; color: var(--muted); font-size: 14px; }
+    main { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; padding: 24px 32px; }
+    @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+    .card {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px;
+    }
+    .card h2 { margin: 0 0 4px; font-size: 16px; }
+    .tier { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--accent); font-weight: 600; }
+    .card p.desc { margin: 8px 0 14px; color: var(--muted); font-size: 13px; }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+    label { font-size: 12px; color: var(--muted); }
+    input {
+      width: 90px; background: #0c0e13; border: 1px solid var(--border); color: var(--text);
+      border-radius: 6px; padding: 6px 8px; font-size: 13px;
+    }
+    button {
+      background: var(--accent); color: #fff; border: 0; border-radius: 6px; padding: 7px 14px;
+      font-size: 13px; font-weight: 600; cursor: pointer;
+    }
+    button.ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
+    button:hover { filter: brightness(1.1); }
+    pre {
+      margin: 10px 0 0; background: #0c0e13; border: 1px solid var(--border); border-radius: 6px;
+      padding: 10px 12px; font-size: 12px; max-height: 220px; overflow: auto; white-space: pre-wrap;
+    }
+    .meta { font-size: 12px; margin-bottom: 4px; }
+    .meta .s-ok { color: var(--ok); } .meta .s-err { color: var(--err); } .meta .s-warn { color: var(--warn); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>why-jvm playground</h1>
+    <p>Dispare cenarios reais (erro, lentidao, N+1, contencao de banco) para ver o agente why-jvm gerar incidentes. Os endpoints rapidos ja foram aquecidos na subida. &middot; <a href="/swagger-ui.html" style="color: var(--accent);">Abrir no Swagger UI</a></p>
+  </header>
+
+  <main>
+    <section class="card">
+      <span class="tier">Tier 3 &middot; N+1</span>
+      <h2>Listagem de livros (autor lazy)</h2>
+      <p class="desc">A versao naive carrega 1 query da pagina e mais 1 por livro ao tocar no autor. Suba o <code>limit</code> para inflar o N+1 e disparar o incidente; compare com a versao otimizada (join fetch).</p>
+      <div class="row">
+        <label>limit <input id="nplus1-limit" type="number" value="300" min="1" max="500"></label>
+        <button onclick="callJson('nplus1', 'GET', '/api/catalog/books?limit=' + val('nplus1-limit'))">Disparar N+1</button>
+        <button class="ghost" onclick="callJson('nplus1', 'GET', '/api/catalog/books/optimized?limit=' + val('nplus1-limit'))">Versao otimizada</button>
+      </div>
+      <div id="nplus1-out"></div>
+    </section>
+
+    <section class="card">
+      <span class="tier">Tier 1 &middot; Lentidao</span>
+      <h2>Detalhe de livro com dependencia lenta</h2>
+      <p class="desc">Busca rapida por id (rota aquecida). O <code>slowDownstreamMs</code> simula uma dependencia externa lenta na mesma rota, fazendo a chamada estourar o p99 e virar SLOW.</p>
+      <div class="row">
+        <label>id <input id="slow-id" type="number" value="1" min="1"></label>
+        <label>slowDownstreamMs <input id="slow-ms" type="number" value="3000" min="0"></label>
+        <button onclick="callJson('slow', 'GET', '/api/catalog/books/' + val('slow-id') + '?slowDownstreamMs=' + val('slow-ms'))">Disparar lentidao</button>
+      </div>
+      <div id="slow-out"></div>
+    </section>
+
+    <section class="card">
+      <span class="tier">Tier 1/2 &middot; Erro</span>
+      <h2>Excecoes nao tratadas</h2>
+      <p class="desc">Cada botao deixa uma excecao real subir (divisao por zero, nulo, estado invalido). O request termina em 500 e o incidente dispara na hora, sem aquecimento.</p>
+      <div class="row">
+        <button onclick="callJson('err', 'GET', '/api/faults/checkout')">Divisao por zero</button>
+        <button onclick="callJson('err', 'GET', '/api/faults/invoice')">NullPointer</button>
+        <button onclick="callJson('err', 'GET', '/api/faults/inventory')">Estado invalido</button>
+      </div>
+      <div id="err-out"></div>
+    </section>
+
+    <section class="card">
+      <span class="tier">Banco &middot; Conexao</span>
+      <h2>Query lenta e exaustao de pool</h2>
+      <p class="desc">A query lenta segura uma conexao via <code>pg_sleep</code>. A saturacao ocupa todas as conexoes do pool pequeno (5) e pede mais uma: o HikariCP estoura com o erro nativo de conexao indisponivel e o request termina em erro &mdash; sem parametros, o tamanho e o timeout vem do proprio pool.</p>
+      <div class="row">
+        <label>seconds <input id="db-seconds" type="number" value="3" min="0"></label>
+        <button class="ghost" onclick="callJson('db', 'GET', '/api/database/slow-query?seconds=' + val('db-seconds'))">Query lenta</button>
+      </div>
+      <div class="row">
+        <button onclick="callJson('db', 'POST', '/api/database/saturate-pool')">Esgotar pool</button>
+      </div>
+      <div id="db-out"></div>
+    </section>
+  </main>
+
+  <script>
+    function val(id) { return document.getElementById(id).value; }
+
+    async function callJson(slot, method, path) {
+      const out = document.getElementById(slot + '-out');
+      out.innerHTML = '<div class="meta">chamando ' + method + ' ' + path + ' ...</div>';
+      const started = performance.now();
+      try {
+        const response = await fetch(path, { method });
+        const elapsed = Math.round(performance.now() - started);
+        const body = await response.text();
+        const cls = response.ok ? 's-ok' : (response.status >= 500 ? 's-err' : 's-warn');
+        out.innerHTML =
+          '<div class="meta"><span class="' + cls + '">HTTP ' + response.status + '</span> &middot; ' + elapsed + ' ms</div>' +
+          '<pre>' + pretty(body) + '</pre>';
+      } catch (failure) {
+        out.innerHTML = '<div class="meta"><span class="s-err">falha de rede</span></div><pre>' + failure + '</pre>';
+      }
+    }
+
+    function pretty(text) {
+      try { return JSON.stringify(JSON.parse(text), null, 2); } catch (e) { return text; }
+    }
+  </script>
+</body>
+</html>
