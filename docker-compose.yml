@@ -1,18 +1,16 @@
-# Sobe Postgres + a aplicacao COM o agente why-jvm anexado (modo split): o agente
-# captura o incidente e ENCAMINHA para o analysis-service em Go (http://analysis-service:9090),
-# que roda o LLM e despacha o laudo.
+# Sobe Postgres + a aplicacao COM o agente why-jvm anexado + o why-jvm-mcp,
+# tudo no mesmo compose (mesma rede). O agente captura o incidente e ENCAMINHA
+# para o why-jvm-mcp (http://why-jvm-mcp:9090), que roda o LLM e
+# despacha o laudo.
 #
 # Os jars do agente vem de releases publicadas no GitHub (ver Dockerfile, estagio
-# runtime-whyjvm), entao EXIGE a release do why-jvm-mcp publicada (WHYJVM_RELEASE).
-#
-# Pre-requisitos:
-#   1) docker network create whyjvm-net          # rede compartilhada (uma vez so)
-#   2) suba o analysis-service: no repo why-jvm-mcp -> docker compose up --build
+# runtime-whyjvm), entao EXIGE a release publicada (WHYJVM_RELEASE). O
+# why-jvm-mcp usa a imagem publicada no Docker Hub (marcosaaj/why-jvm-mcp).
 #
 # Uso:
 #   docker compose up --build
 # Depois abra http://localhost:8080, dispare um cenario (ex.: GET /api/faults/checkout)
-# e veja o laudo no log do analysis-service (no repo why-jvm-mcp: docker compose logs -f).
+# e veja o laudo: docker compose logs -f why-jvm-mcp
 services:
   db:
     image: postgres:17-alpine
@@ -28,6 +26,35 @@ services:
       timeout: 3s
       retries: 10
 
+  why-jvm-mcp:
+    image: marcosaaj/why-jvm-mcp:latest
+    ports:
+      # Exposto no host para curl direto (GET /healthz). O app fala por DNS interno.
+      - "9090:9090"
+    environment:
+      WHYJVM_ADDR: ":9090"
+      # Sem auth no ingest (dev). Para exigir token, use o MESMO valor aqui e em
+      # whyjvm.forward.token no app.
+      WHYJVM_INGEST_TOKEN: ""
+      WHYJVM_AUTO_INVESTIGATE: "true"
+      # Provider do agente: stub (default, sem key) | claude | gemini. Para analise
+      # real, troque e informe a key correspondente abaixo.
+      WHYJVM_LLM_PROVIDER: "stub"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+
+      # Use log ou slack para definir o canal do laudo, pelo log sera no log da aplicação
+      # pelo slack sera no chat do webhook configurado em WHYJVM_SLACK_WEBHOOK_URL.
+      WHYJVM_SINK: "log"
+      WHYJVM_SLACK_WEBHOOK_URL: "${WEBHOOK_SLACK:-}"
+    volumes:
+      - ./incidents-store:/app/incidents-store
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   app:
     build:
       context: .
@@ -38,6 +65,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      why-jvm-mcp:
+        condition: service_healthy
     ports:
       - "8080:8080"
     environment:
@@ -46,14 +75,3 @@ services:
       SPRING_DATASOURCE_PASSWORD: whyjvm
       # Pool pequeno de proposito: o cenario de exaustao precisa de poucas chamadas.
       DB_POOL_SIZE: "5"
-    # `default` mantem o acesso ao Postgres (servico db); `whyjvm-net` da o acesso
-    # ao analysis-service por DNS. Sem listar as duas, o app sairia da rede default
-    # e perderia o banco.
-    networks:
-      - default
-      - whyjvm-net
-
-# Mesma rede externa declarada no compose do why-jvm-mcp.
-networks:
-  whyjvm-net:
-    external: true

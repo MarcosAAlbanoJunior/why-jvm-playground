@@ -21,7 +21,7 @@ EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]
 
 # Estagio com o agente why-jvm anexado, em MODO LOG (sem forward.url: o laudo do
-# incidente sai no log da propria aplicacao, sem precisar do analysis-service).
+# incidente sai no log da propria aplicacao, sem precisar do why-jvm-mcp).
 #
 # Os dois jars vem de RELEASES publicadas no GitHub — nada de codigo local:
 #   - o agente OpenTelemetry (repo do OTel)
@@ -38,4 +38,4 @@ ADD https://github.com/MarcosAAlbanoJunior/why-jvm/releases/download/${WHYJVM_RE
 # raiz, recorta a janela ao redor da linha culpada e o laudo mostra o codigo.
 COPY --from=build /build/src/main/java /app/sources
 # O JVM aplica JAVA_TOOL_OPTIONS automaticamente: o ENTRYPOINT continua "java -jar".
-ENV JAVA_TOOL_OPTIONS="-javaagent:/agent/opentelemetry-javaagent.jar -Dotel.javaagent.extensions=/agent/why-jvm-extension.jar -Dotel.traces.exporter=none -Dotel.metrics.exporter=none -Dotel.logs.exporter=none -Dwhyjvm.app.packages=io.whyjvm.playground -Dwhyjvm.source.dirs=/app/sources -Dwhyjvm.forward.url=http://analysis-service:9090"
+ENV JAVA_TOOL_OPTIONS="-javaagent:/agent/opentelemetry-javaagent.jar -Dotel.javaagent.extensions=/agent/why-jvm-extension.jar -Dotel.traces.exporter=none -Dotel.metrics.exporter=none -Dotel.logs.exporter=none -Dwhyjvm.app.packages=io.whyjvm.playground -Dwhyjvm.source.dirs=/app/sources -Dwhyjvm.forward.url=http://why-jvm-mcp:9090"
